@@ -17,6 +17,13 @@ from tkinter import ttk
 from obplib import OBP_pb2 as obp
 import obflib
 
+import obanalyser.analyse_build as analyse_build
+import obanalyser.plotters.plot_build_data as plot_build_data
+import obanalyser.get_build_order as get_build_order
+from rich.progress import Progress
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
 # PyPI
 
 try:
@@ -79,6 +86,18 @@ def load_obp_objects(filepath):
         attr = packet.WhichOneof("payload")
         yield getattr(packet, attr)
 
+def merge_obp_objects(obp_objects):
+    merged = []
+    for obj in obp_objects:
+        if isinstance(obj, obp.TimedPoints):
+            if merged and isinstance(merged[-1], obp.TimedPoints):
+                merged[-1].points.extend(obj.points)
+            else:
+                merged.append(obj)
+        else:
+            merged.append(obj)
+    return merged
+
 def _unpack_tp(obp_objects):
     for obj in obp_objects:
         if isinstance(obj, obp.TimedPoints):
@@ -135,8 +154,8 @@ def load_artist_data(obp_objects) -> Data:
     for key in syncpoints:
         syncpoints[key] = np.array(syncpoints[key])
 
-    if len(paths) == 0:
-        raise Exception("no lines or curves in obp data")
+    #sif len(paths) == 0:
+        #raise Exception("no lines or curves in obp data")
 
     return Data(
         paths,
@@ -149,17 +168,18 @@ def load_artist_data(obp_objects) -> Data:
     )
 
 class ObpFrame(ttk.Frame):
-    def __init__(self, master, data, layer_count, layerinfo, slice_size, index=None, **kwargs):
+    def __init__(self, master, data, layer_count, buildinfo, slice_size, index=None, **kwargs):
         super().__init__(master, **kwargs)
         self.data = data
         index = index if index is not None else slice_size
         self.layer_index = 0
         self.layer_count = layer_count
-        self.layerinfo = layerinfo
+        self.buildinfo = buildinfo
+        #self.layerinfo = layerinfo
         self.cap = lambda i: max(0, min(len(self.data[self.layer_index].paths) - 1, int(i)))
 
-        print(f"size of layerinfo: {len(self.layerinfo)}")
-        print(f"first layerinfo: {self.layerinfo[0]}")
+        #print(f"size of layerinfo: {len(self.layerinfo)}")
+        #print(f"first layerinfo: {self.layerinfo[0]}")
 
         index = self.cap(index)
         slice_ = slice(self.cap(index + 1 - slice_size), self.cap(index) + 1)
@@ -320,8 +340,33 @@ class ObpFrame(ttk.Frame):
         self.button_quit.grid(row=3, column=3, sticky="SE")
         self.toolbar_frame.grid(row=4, columnspan=4, sticky="NSWE")
 
+def load_obp_worker(file):
+    """Worker function to load a single OBP file."""
+    obp_objects = load_obp_objects(file)
+    return load_artist_data(obp_objects)
 
-
+def load_obp_files_parallel(layer_sequence):
+    """Load OBP files in parallel but return results in sequence."""
+    
+    data = [None] * len(layer_sequence)
+    
+    with Progress() as progress:
+        task = progress.add_task("Loading layers...", total=len(layer_sequence))
+        
+        with ThreadPoolExecutor() as executor:
+            # Submit all tasks with their index
+            future_to_index = {
+                executor.submit(load_obp_worker, file): i 
+                for i, file in enumerate(layer_sequence)
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                data[index] = future.result()
+                progress.update(task, advance=1)
+    
+    return data
 
 def main():
     parser = argparse.ArgumentParser(description="OBP data viewer")
@@ -343,16 +388,16 @@ def main():
         zip_ref.extractall(temp_dir)
 
     #grab the buildInfo and find all layer files. Save them in sequence listing repeats
-    layer_sequence = []
-    with open(temp_dir / "buildInfo.json", "r") as f:
-        build_info = json.load(f)
+    #layer_sequence = []
+    #with open(temp_dir / "buildInfo.json", "r") as f:
+        #build_info = json.load(f)
         # decode json and print number of layers
 
-        layer_count = build_info["layers"]
-        print(f"Build has {len(layer_count)} layers.")
+        #layer_count = build_info["layers"]
+        #print(f"Build has {len(layer_count)} layers.")
 
-        layerinfo = []
-        
+        #layerinfo = []
+        '''
         # iterate thru items in layers
         for layer in build_info["layers"]:
             print(f"Processing layer {layer}")
@@ -393,7 +438,8 @@ def main():
             except KeyError:
                 pass
             layer_counter += int(1)
-
+            
+            
 
 
     if not layer_sequence:
@@ -402,12 +448,56 @@ def main():
     
     #print the found obp files
     print(f"Found {len(layer_sequence)} .obp files:")
-    data = [None] * len(layer_sequence)
+    '''
+    #data = [None] * len(layer_sequence)
 
-    for idx, f in enumerate(layer_sequence):
-        obp_objects = load_obp_objects(f)
-        data[idx] = load_artist_data(obp_objects)
-        print(f"Loaded {len(data[idx].paths)} paths from {f.name}")
+    sequence = get_build_order.get_layer_execution_sequence(f"{temp_dir}/buildInfo.json")
+    analysis = analyse_build.analyse_build(f"{temp_dir}/buildInfo.json")
+
+
+    #
+    layer_sequence = []
+    for item in sequence[0]:
+        layers = item
+        for layer in layers:
+            #print(layer)
+            scanpaths = layer
+            for scanpath in scanpaths:
+                #print(scanpaths)
+                (obp_path, repetitions) = scanpaths
+                for rep in range(repetitions):
+                    #append to layer sequence
+                    #print(f"Adding {obp_path} repetition {rep+1} of {repetitions}")
+                    #sanitize for pathlib
+                    obp_path = pathlib.Path(obp_path)
+                    # if obp_path contains "melt" in the filename
+                    if "melt" in obp_path.name:     
+                        layer_sequence.append(obp_path)
+                    
+                   
+                
+        #print(item)
+                
+    
+    print(f"Found {len(layer_sequence)} .obp files:")
+
+    
+
+    
+    data = [None] * len(layer_sequence)
+    '''
+    with Progress() as progress:
+        task = progress.add_task("Loading layers...", total=len(layer_sequence))
+        while not progress.finished:
+            for file in layer_sequence:
+                #print(f"Loading {file}")
+                obp_objects = load_obp_objects(file)
+                data.append(load_artist_data(obp_objects))
+                print(f"Loaded layer with {len(data[-1].paths)} paths from {file.name}")
+                #print(f"Loaded {len(data[-1].paths)} paths from {file.name}")
+                progress.update(task, advance=1)'''
+
+    data = load_obp_files_parallel(layer_sequence)
 
     root = tkinter.Tk()
     # start maximized
@@ -416,11 +506,11 @@ def main():
 
     root.title(f"OBP Viewer - {args.obp_file.name}")
     print(f"Loaded {len(data)} layers from {args.obp_file.name}")
-    frame = ObpFrame(root, data, len(data), layerinfo, args.slice_size, args.index)
+    
+    frame = ObpFrame(root, data, len(data), analysis, args.slice_size, args.index)
     frame.grid(row=0, column=0, sticky="NSWE", padx=5, pady=5)
     frame.setup_grid()
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
