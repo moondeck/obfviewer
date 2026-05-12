@@ -1,6 +1,5 @@
 import argparse
 import dataclasses
-from logging import root
 import pathlib
 import gzip
 import sys
