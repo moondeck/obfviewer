@@ -1,3 +1,7 @@
+# OBF/OBP build files — large binary data, do not commit
+# (small test fixtures belong in tests/fixtures/ and are tracked explicitly)
+*.obf
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
