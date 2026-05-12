@@ -51,13 +51,24 @@ def _detect_cupy():
     try:
         import cupy as cp  # noqa: F401
 
-        # Quick smoke-test: allocate a tiny array to confirm the runtime works
+        # Quick smoke-test: allocate a tiny array to confirm the runtime works.
+        # AttributeError means the generic 'cupy' stub is installed without a
+        # real backend wheel (e.g. cupy-cuda12x) — treat that silently as "not
+        # installed" rather than alarming the user.
+        if not hasattr(cp, "array"):
+            return None
+
         cp.array([0], dtype=cp.float32)
         return cp
     except ImportError:
-        # CuPy not installed — fall back to numpy silently
+        # CuPy not installed at all — fall back to numpy silently.
         return None
-    except Exception as exc:  # CUDA / ROCm runtime error
+    except AttributeError:
+        # Stub package installed without a real CUDA/ROCm backend.
+        return None
+    except Exception as exc:
+        # CuPy is properly installed but the GPU runtime itself failed
+        # (e.g. driver version mismatch, no device found).
         warnings.warn(
             f"GPU runtime detected but failed to initialise: {exc}. "
             "Falling back to CPU (numpy). "
