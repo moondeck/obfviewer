@@ -1,7 +1,16 @@
 # SPDX-FileCopyrightText: 2022 Freemelt AB
+# SPDX-FileCopyrightText: 2025-2026 Olgierd Nowakowski
 # SPDX-License-Identifier: Apache-2.0
 
-"""OBP file loading functions."""
+"""OBP file loading functions.
+
+GPU note
+--------
+When the `feature/gpu-acceleration` branch is active and CuPy is installed,
+the heavy numpy array operations (coordinate scaling, stacking) are performed
+on the GPU via the ``obfviewer.gpu`` module.  All GPU arrays are converted back
+to numpy before being handed to matplotlib/VTK, which expect CPU memory.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +25,11 @@ from matplotlib.path import Path
 from obplib import OBP_pb2 as obp
 from rich.progress import Progress
 
+from obfviewer.gpu import to_numpy, using_gpu, xp
 from obfviewer.models import Data, TimedPoint
+
+if using_gpu:
+    import obfviewer.gpu as _gpu  # noqa: F401 – imported for side-effects / logging
 
 
 def load_obp_objects(filepath: pathlib.Path) -> Generator:
@@ -187,19 +200,20 @@ def load_artist_data_fast(obp_objects: Iterable) -> Data:
         restores.append(_restore)
         _restore = 0
 
-    # Batch create numpy arrays for vertices
+    # Batch-convert vertex lists to arrays (GPU if available, else CPU).
+    # to_numpy() brings any cupy array back to CPU memory for matplotlib.
     if line_vertices:
-        line_arr = np.array(line_vertices, dtype=np.float64) * scale
+        line_arr = to_numpy(xp.array(line_vertices, dtype=xp.float64) * scale)
     else:
         line_arr = np.empty((0, 4), dtype=np.float64)
 
     if curve_vertices:
-        curve_arr = np.array(curve_vertices, dtype=np.float64).reshape(-1, 4, 2) * scale
+        curve_arr = to_numpy(xp.array(curve_vertices, dtype=xp.float64).reshape(-1, 4, 2) * scale)
     else:
         curve_arr = np.empty((0, 4, 2), dtype=np.float64)
 
     if diamond_vertices:
-        diamond_arr = np.array(diamond_vertices, dtype=np.float64) * scale
+        diamond_arr = to_numpy(xp.array(diamond_vertices, dtype=xp.float64) * scale)
     else:
         diamond_arr = np.empty((0, 2), dtype=np.float64)
 
@@ -236,12 +250,13 @@ def load_artist_data_fast(obp_objects: Iterable) -> Data:
     # Convert syncpoints lists to numpy arrays
     syncpoints_np = {key: np.array(val, dtype=np.int32) for key, val in syncpoints.items()}
 
+    # speeds/dwell_times/spotsizes/beampowers: compute on GPU, store on CPU
     return Data(
         paths=paths,
-        speeds=np.array(speeds, dtype=np.float64),
-        dwell_times=np.array(dwell_times, dtype=np.float64),
-        spotsizes=np.array(spotsizes, dtype=np.float64),
-        beampowers=np.array(beampowers, dtype=np.float64),
+        speeds=to_numpy(xp.array(speeds, dtype=xp.float64)),
+        dwell_times=to_numpy(xp.array(dwell_times, dtype=xp.float64)),
+        spotsizes=to_numpy(xp.array(spotsizes, dtype=xp.float64)),
+        beampowers=to_numpy(xp.array(beampowers, dtype=xp.float64)),
         syncpoints=syncpoints_np,
         restores=np.array(restores, dtype=np.int8),
     )
@@ -522,7 +537,9 @@ def load_obp_files_parallel(
     skipped = total_count - unique_count
 
     if show_progress:
-        print(f"Loading {unique_count} unique files ({skipped} duplicates skipped)")
+        from obfviewer.gpu import gpu_info, using_gpu
+        gpu_label = f" | GPU: {gpu_info()}" if using_gpu else " | GPU: off"
+        print(f"Loading {unique_count} unique files ({skipped} duplicates skipped){gpu_label}")
 
     # Load only unique files
     cache: dict[pathlib.Path, Data] = {}

@@ -42,11 +42,16 @@ dev = [
     "ruff>=0.4.0",
 ]
 gpu = [
-    # Optional GPU-accelerated array processing (NVIDIA / AMD ROCm)
-    # Install one of:
+    # Optional GPU-accelerated array processing (NVIDIA CUDA or AMD ROCm).
+    # Install ONE of the following matching your GPU driver BEFORE running
+    # pip install -e ".[gpu]":
+    #
     #   pip install cupy-cuda12x   (NVIDIA CUDA 12.x)
+    #   pip install cupy-cuda11x   (NVIDIA CUDA 11.x)
     #   pip install cupy-rocm-5-0  (AMD ROCm 5.0)
-    "cupy; platform_system != 'unsupported'",
+    #
+    # cupy is not available under the generic name on PyPI, so we cannot list
+    # it as a dependency here — pick the right wheel above manually.
 ]
 
 [build-system]

@@ -964,8 +964,10 @@ class CombinedViewer(QMainWindow):
 
     def _on_2d_loaded(self, data: list, layer_nums: list, scan_types: list) -> None:
         self.view_2d.set_data(data, layer_nums, scan_types)
+        from obfviewer.gpu import gpu_info, using_gpu
+        gpu_label = f" | GPU: {gpu_info()}" if using_gpu else ""
         self.status.showMessage(
-            f"2D view ready — {len(data)} scans, types: {set(scan_types)}"
+            f"2D view ready — {len(data)} scans, types: {set(scan_types)}{gpu_label}"
         )
 
     def _on_3d_loaded(self, lines: np.ndarray, spots: np.ndarray) -> None:
