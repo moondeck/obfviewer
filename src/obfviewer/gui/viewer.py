@@ -77,12 +77,14 @@ class ObpFrame(ttk.Frame):
         self._setup_axes(ax)
 
         # Create path collection
+        speeds = self.data[self.layer_index].speeds
+        vmax = float(max(speeds)) if len(speeds) > 0 else 1.0
         self.path_collection = mcoll.PathCollection(
             self.data[self.layer_index].paths[slice_],
             facecolors="none",
             transform=ax.transData,
             cmap=plt.cm.rainbow,
-            norm=plt.Normalize(vmin=0, vmax=max(self.data[self.layer_index].speeds)),
+            norm=plt.Normalize(vmin=0, vmax=vmax),
         )
         self.path_collection.set_array(self.data[self.layer_index].speeds[slice_])
         ax.add_collection(self.path_collection)
@@ -93,9 +95,13 @@ class ObpFrame(ttk.Frame):
         )
         cbar.ax.tick_params(axis="y", labelsize=8)
 
-        # Create marker for current position
-        seg = self.data[self.layer_index].paths[index]
-        self.marker = ax.scatter(*seg.vertices[-1], c="white", marker="*", zorder=2)
+        # Create marker for current position (hidden when layer has no paths)
+        paths = self.data[self.layer_index].paths
+        if paths:
+            seg = paths[index]
+            self.marker = ax.scatter(*seg.vertices[-1], c="white", marker="*", zorder=2)
+        else:
+            self.marker = ax.scatter(0, 0, c="white", marker="*", zorder=2, visible=False)
 
         # Create canvas
         self.canvas = FigureCanvasTkAgg(fig, master=self)

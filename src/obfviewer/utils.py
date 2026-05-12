@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import atexit
+import os
 import pathlib
 import shutil
 import tempfile
@@ -36,7 +37,13 @@ def extract_obf_archive(obf_path: pathlib.Path) -> pathlib.Path:
     atexit.register(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
 
     with zipfile.ZipFile(obf_path, "r") as zip_ref:
-        zip_ref.extractall(temp_dir)
+        # Guard against Zip Slip: reject members with path-traversal components.
+        dest = temp_dir.resolve()
+        for member in zip_ref.infolist():
+            member_path = (dest / member.filename).resolve()
+            if not str(member_path).startswith(str(dest) + os.sep) and member_path != dest:
+                raise ValueError(f"Unsafe path in archive: {member.filename!r}")
+        zip_ref.extractall(dest)
 
     return temp_dir
 
@@ -67,7 +74,7 @@ def get_layer_sequence(
             (obp_path, repetitions) = scanpaths
             obp_path = pathlib.Path(obp_path)
 
-            if melt_only and "melt" not in obp_path.name:
+            if melt_only and _extract_scan_type(obp_path.name) != "melt":
                 continue
 
             for _ in range(repetitions):
@@ -149,11 +156,10 @@ def get_layer_sequence_with_info(
             (obp_path, repetitions) = scanpaths
             obp_path = pathlib.Path(obp_path)
 
-            if melt_only and "melt" not in obp_path.name:
+            scan_type = _extract_scan_type(obp_path.name)
+            if melt_only and scan_type != "melt":
                 continue
 
-            scan_type = _extract_scan_type(obp_path.name)
-            
             for _ in range(repetitions):
                 layer_sequence.append(obp_path)
                 layer_numbers.append(physical_layer)
@@ -195,7 +201,7 @@ def get_grouped_layer_sequence(
             (obp_path, repetitions) = scanpaths
             obp_path = pathlib.Path(obp_path)
 
-            if melt_only and "melt" not in obp_path.name:
+            if melt_only and _extract_scan_type(obp_path.name) != "melt":
                 continue
 
             for _ in range(repetitions):

@@ -67,7 +67,7 @@ Options:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--layer-height UM` | `70` | Layer height in micrometres |
-| `--max-per-file N` | `5000` | Max 3D geometry elements per file |
+| `--max-per-file N` | `50000` | Max 3D geometry elements per file |
 | `--all-scans` | off | Include all scan types (not just melt) |
 | `--no-3d` | off | Disable the 3D view (faster startup) |
 

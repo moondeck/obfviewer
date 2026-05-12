@@ -17,6 +17,7 @@ from __future__ import annotations
 import gzip
 import pathlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from typing import Generator, Iterable
 
 import numpy as np
@@ -544,8 +545,10 @@ def load_obp_files_parallel(
     # Load only unique files
     cache: dict[pathlib.Path, Data] = {}
 
-    # Use ProcessPoolExecutor for CPU-bound protobuf parsing (GIL limits ThreadPool)
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    # Use ProcessPoolExecutor with spawn context for CPU-bound protobuf parsing.
+    # Spawn (rather than fork) avoids forking after any CUDA runtime initialisation,
+    # which is unsafe and can hang or crash on Linux.
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context("spawn")) as executor:
         future_to_file = {
             executor.submit(load_obp_worker, file): file
             for file in unique_files
@@ -680,7 +683,7 @@ def load_grouped_layers_parallel(
     # Load all unique files
     cache: dict[pathlib.Path, Data] = {}
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context("spawn")) as executor:
         future_to_file = {
             executor.submit(load_obp_worker, file): file
             for file in unique_files

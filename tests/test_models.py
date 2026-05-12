@@ -37,7 +37,7 @@ def test_data_dataclass():
         syncpoints={"sync1": np.array([0, 1])},
         restores=np.array([0, 1]),
     )
-    
+
     assert len(data.paths) == 0
     assert len(data.speeds) == 2
     assert data.speeds[0] == 1.0

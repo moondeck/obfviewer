@@ -92,8 +92,9 @@ def main(args: list[str] | None = None) -> int:
     analysis = analyse_build.analyse_build(str(build_info_path))
 
     # Get layer sequence with physical layer numbers and scan types
-    # melt_only=False includes all scan types (jumpsafe, preheat, melt)
-    melt_only = False
+    # When --no-melt is not set, default to melt_only=True (only melt scans).
+    # When --no-melt is set, include all scan types.
+    melt_only = not parsed.no_melt
     layer_sequence, layer_numbers, scan_types = get_layer_sequence_with_info(temp_dir, melt_only=melt_only)
 
     if not layer_sequence:

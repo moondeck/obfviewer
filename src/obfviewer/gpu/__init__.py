@@ -110,8 +110,7 @@ def gpu_info() -> str:
         device = cp.cuda.Device(0)
         props = cp.cuda.runtime.getDeviceProperties(device.id)
         name = props["name"].decode("utf-8") if isinstance(props["name"], bytes) else props["name"]
-        cuda_ver = ".".join(str(v) for v in cp.cuda.runtime.runtimeGetVersion.__doc__
-                            .split() if v.isdigit()[:2]) if False else ""
+        cuda_ver = ""
         try:
             runtime_ver = cp.cuda.runtime.runtimeGetVersion()
             major, minor = divmod(runtime_ver, 1000)

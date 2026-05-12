@@ -24,6 +24,7 @@ import gzip
 import pathlib
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 
 import numpy as np
 
@@ -137,8 +138,11 @@ def _parse_obp_for_3d(
                 (obj.p0.x * pscale, obj.p0.y * pscale, obj.p3.x * pscale, obj.p3.y * pscale, z, obj.sf, z)
             )
         elif attr == "timed_points":
+            last_t = 0
             for pt in packet.timed_points.points:
-                spots_list.append((pt.x * pscale, pt.y * pscale, z, pt.t * 1e-6 if pt.t else 0))
+                t = pt.t if pt.t != 0 else last_t
+                last_t = t
+                spots_list.append((pt.x * pscale, pt.y * pscale, z, t * 1e-6))
 
     lines = np.array(lines_list, dtype=np.float32) if lines_list else np.zeros((0, 7), dtype=np.float32)
     spots = np.array(spots_list, dtype=np.float32) if spots_list else np.zeros((0, 4), dtype=np.float32)
@@ -862,7 +866,7 @@ class LoaderThread(QThread):
             all_lines: list[np.ndarray] = []
             all_spots: list[np.ndarray] = []
 
-            with ProcessPoolExecutor() as ex:
+            with ProcessPoolExecutor(mp_context=get_context("spawn")) as ex:
                 futures = {ex.submit(_worker_3d, w): i for i, w in enumerate(work)}
                 done = 0
                 for fut in as_completed(futures):
