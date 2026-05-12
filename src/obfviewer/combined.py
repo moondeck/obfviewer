@@ -48,7 +48,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QPushButton,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 
 # Matplotlib for 2D view
 import matplotlib
@@ -184,6 +184,11 @@ class LayerView2D(QWidget):
         self.dark_mode_enabled = False
         self.current_layer_data: Data | None = None
 
+        # Debounce rapid path-slider drags so the expensive matplotlib
+        # canvas redraw only fires after the user pauses (~80 ms).
+        self._path_timer = QTimer(singleShot=True, interval=80)
+        self._path_timer.timeout.connect(self._flush_path_change)
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -315,7 +320,15 @@ class LayerView2D(QWidget):
 
     def _on_path_changed(self, value: int) -> None:
         self.current_path_idx = value
-        self._update_display(value)
+        # Update the counter label immediately so the UI feels responsive,
+        # then debounce the expensive canvas redraw.
+        if self.current_layer_data is not None:
+            n = len(self.current_layer_data.paths)
+            self.path_label.setText(f"{value + 1}/{n}")
+        self._path_timer.start()
+
+    def _flush_path_change(self) -> None:
+        self._update_display(self.current_path_idx)
 
     def _merge_scan_data(self, indices: list[int]) -> Data | None:
         """Merge one or more scan Data objects into a single Data object."""
@@ -547,6 +560,12 @@ class BuildView3D(QWidget):
         self._last_z_max: float | None = None
         self.dark_mode_enabled = False
 
+        # Debounce the cross-panel layer sync: the clip-plane move is cheap
+        # and happens on every tick, but triggering a full 2D matplotlib
+        # redraw on every tick makes the slider feel jerky.
+        self._sync_timer = QTimer(singleShot=True, interval=120)
+        self._sync_timer.timeout.connect(self._flush_layer_sync)
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -728,14 +747,32 @@ class BuildView3D(QWidget):
         self.plotter.view_isometric()
 
     def _setup_lod(self) -> None:
-        """Hint the VTK interactor's target frame rates.
+        """Configure interactive LOD for smooth dragging.
 
-        VTK uses these rates to drive its own LOD subsystem automatically —
-        no manual actor manipulation needed.
+        Uses vtkInteractorStyle's StartInteractionEvent / EndInteractionEvent
+        rather than raw button events so the callback fires reliably at the
+        *style* level (rotate/pan/zoom gestures) rather than raw mouse clicks.
+        During interaction the tube geometry shader is disabled so VTK renders
+        plain lines — still visible, just not 3D. Restored on release.
         """
         iren = self.plotter.interactor
         iren.SetDesiredUpdateRate(60.0)
         iren.SetStillUpdateRate(0.01)
+
+        style = iren.GetInteractorStyle()
+        style.AddObserver("StartInteractionEvent", lambda *_: self._lod_mode(True))
+        style.AddObserver("EndInteractionEvent", lambda *_: self._lod_mode(False))
+
+    def _lod_mode(self, fast: bool) -> None:
+        """Toggle between interaction quality (fast) and still quality."""
+        if self.lines_actor is not None:
+            prop = self.lines_actor.GetProperty()
+            if fast:
+                prop.RenderLinesAsTubesOff()
+            else:
+                prop.RenderLinesAsTubesOn()
+        if not fast:
+            self.plotter.render()
 
     def _setup_clipping(self) -> None:
         """Attach a GPU clipping plane for fast layer-by-layer Z filtering."""
@@ -756,8 +793,11 @@ class BuildView3D(QWidget):
 
     def _on_slider_changed(self, layer_num: int) -> None:
         self.layer_label.setText(str(layer_num))
-        self._filter_by_z(layer_num * self.layer_height_mm)
-        self.layer_changed.emit(layer_num)
+        self._filter_by_z(layer_num * self.layer_height_mm)  # cheap — just moves the clip plane
+        self._sync_timer.start()  # debounce the expensive 2D cross-sync
+
+    def _flush_layer_sync(self) -> None:
+        self.layer_changed.emit(self.layer_slider.value())
 
     def _filter_by_z(self, z_max: float) -> None:
         """Move the GPU clipping plane to reveal layers up to z_max."""
