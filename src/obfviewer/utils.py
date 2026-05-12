@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import atexit
-import os
 import pathlib
 import shutil
 import tempfile
@@ -41,7 +40,7 @@ def extract_obf_archive(obf_path: pathlib.Path) -> pathlib.Path:
         dest = temp_dir.resolve()
         for member in zip_ref.infolist():
             member_path = (dest / member.filename).resolve()
-            if not str(member_path).startswith(str(dest) + os.sep) and member_path != dest:
+            if not member_path.is_relative_to(dest):
                 raise ValueError(f"Unsafe path in archive: {member.filename!r}")
         zip_ref.extractall(dest)
 

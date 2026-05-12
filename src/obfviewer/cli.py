@@ -91,9 +91,9 @@ def main(args: list[str] | None = None) -> int:
     build_info_path = temp_dir / "buildInfo.json"
     analysis = analyse_build.analyse_build(str(build_info_path))
 
-    # Get layer sequence with physical layer numbers and scan types
-    # When --no-melt is not set, default to melt_only=True (only melt scans).
-    # When --no-melt is set, include all scan types.
+    # Get layer sequence with physical layer numbers and scan types.
+    # By default only melt scans are loaded. --no-melt disables that filter so
+    # all scan types (jumpsafe, preheat, melt, …) are included.
     melt_only = not parsed.no_melt
     layer_sequence, layer_numbers, scan_types = get_layer_sequence_with_info(temp_dir, melt_only=melt_only)
 
