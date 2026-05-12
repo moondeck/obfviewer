@@ -660,7 +660,10 @@ class BuildView3D(QWidget):
 
         sb_color = "#e0e0e0" if self.dark_mode_enabled else "black"
 
-        # Line geometry → tubes
+        # Line geometry — stored as raw PolyData lines (no tube tessellation).
+        # render_lines_as_tubes=True tells the OpenGL shader to draw them as
+        # 3D tubes entirely on the GPU, which is instant compared to VTK's
+        # CPU-side .tube() tessellation.
         if len(lines) > 0:
             n = len(lines)
             pts = np.zeros((n * 2, 3), dtype=np.float32)
@@ -681,28 +684,34 @@ class BuildView3D(QWidget):
             lm.point_data["speed"] = np.repeat(lines[:, 5].astype(np.float32), 2)
             lm.point_data["z"] = np.repeat(lines[:, 4].astype(np.float32), 2)
 
-            self.lines_mesh = lm.tube(radius=0.2, n_sides=6)
+            self.lines_mesh = lm
             self.lines_actor = self.plotter.add_mesh(
-                self.lines_mesh, scalars="speed", cmap="rainbow",
+                lm, scalars="speed", cmap="rainbow",
                 clim=[0, speed_max], show_scalar_bar=True,
                 scalar_bar_args={"title": "Speed (m/s)", "color": sb_color},
+                render_lines_as_tubes=True,
+                line_width=6,
                 name="lines",
             )
         else:
             self.lines_mesh = self.lines_actor = None
 
-        # Spot geometry → sphere glyphs
+        # Spot geometry — stored as raw PolyData point cloud (no glyph tessellation).
+        # render_points_as_spheres=True uses the GPU shader to draw spheres.
         if len(spots) > 0:
-            max_spots = 200_000
+            max_spots = 500_000
             s = spots if len(spots) <= max_spots else spots[np.linspace(0, len(spots) - 1, max_spots, dtype=np.int32)]
             pc = pv.PolyData(s[:, :3].astype(np.float32))
             pc.point_data["speed"] = s[:, 3].astype(np.float32)
             pc.point_data["z"] = s[:, 2].astype(np.float32)
-            sphere = pv.Sphere(radius=0.25, theta_resolution=6, phi_resolution=6)
-            self.spots_mesh = pc.glyph(geom=sphere, scale=False, orient=False)
+
+            self.spots_mesh = pc
             self.spots_actor = self.plotter.add_mesh(
-                self.spots_mesh, scalars="speed", cmap="rainbow",
-                clim=[0, speed_max], show_scalar_bar=False, name="spots",
+                pc, scalars="speed", cmap="rainbow",
+                clim=[0, speed_max], show_scalar_bar=False,
+                render_points_as_spheres=True,
+                point_size=8,
+                name="spots",
             )
         else:
             self.spots_mesh = self.spots_actor = None
@@ -862,13 +871,14 @@ class CombinedViewer(QMainWindow):
         self,
         obf_path: pathlib.Path,
         layer_height_um: float = 70.0,
-        max_per_file: int = 5000,
+        max_per_file: int = 50_000,
         melt_only: bool = True,
         no_3d: bool = False,
     ):
         super().__init__()
         self.obf_path = obf_path
         self.layer_height_um = layer_height_um
+        self.max_per_file = max_per_file
         self.sync_layers = True
         self.no_3d = no_3d
 
@@ -1035,7 +1045,7 @@ class CombinedViewer(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.status.showMessage("Loading…")
-        self._start_loader(self.obf_path, 5000, True)
+        self._start_loader(self.obf_path, self.max_per_file, True)
 
         if not self.no_3d:
             self.sync_check.setChecked(sync)
@@ -1077,8 +1087,9 @@ def main(args: list[str] | None = None) -> int:
     parser.add_argument("obf_file", type=pathlib.Path, help="Path to .obf archive")
     parser.add_argument("--layer-height", type=float, default=70.0, metavar="UM",
                         help="Layer height in micrometres")
-    parser.add_argument("--max-per-file", type=int, default=5000,
-                        help="Max 3D geometry elements per file (lower = faster load, less detail)")
+    parser.add_argument("--max-per-file", type=int, default=50_000,
+                        help="Max 3D geometry elements per file. The 3D view uses GPU-shader"
+                             " lines/points so higher values are cheap to render.")
     parser.add_argument("--all-scans", action="store_true",
                         help="Load all scan types, not just melt scans")
     parser.add_argument("--no-3d", action="store_true",
