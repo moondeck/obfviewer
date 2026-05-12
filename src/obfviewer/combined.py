@@ -557,7 +557,9 @@ class BuildView3D(QWidget):
         self.plotter = QtInteractor(self)
         self.plotter.set_background("white", top="lightblue")
         self.plotter.add_axes(xlabel="X (mm)", ylabel="Y (mm)", zlabel="Z (mm)")
-        self.plotter.enable_anti_aliasing("ssaa")
+        # FXAA is a 2D post-process filter — nearly free vs SSAA which renders
+        # the scene at 2× resolution (4× fragment cost) before downsampling.
+        self.plotter.enable_anti_aliasing("fxaa")
         self.plotter.enable_parallel_projection()
         layout.addWidget(self.plotter.interactor, stretch=1)
 
@@ -721,8 +723,42 @@ class BuildView3D(QWidget):
         self.plotter.add_mesh(plate, color="silver", specular=0.5, specular_power=20, name="build_plate")
 
         self._setup_clipping()
+        self._setup_lod()
         self.plotter.reset_camera()
         self.plotter.view_isometric()
+
+    def _setup_lod(self) -> None:
+        """Configure interactive LOD for 60fps drag performance.
+
+        During mouse interaction the geometry shader (render_lines_as_tubes)
+        and point-sphere shader are disabled so VTK renders bare lines/points.
+        On button release both are restored and the scene is re-rendered at full
+        quality.  This mirrors what vtkLODActor does internally.
+        """
+        iren = self.plotter.interactor
+        # Tell VTK to target 60fps during interaction and ~10fps at rest.
+        iren.SetDesiredUpdateRate(60.0)
+        iren.SetStillUpdateRate(0.01)
+
+        for event in ("LeftButtonPressEvent", "RightButtonPressEvent", "MiddleButtonPressEvent"):
+            iren.AddObserver(event, lambda *_: self._lod_mode(True), 1.0)
+        for event in ("LeftButtonReleaseEvent", "RightButtonReleaseEvent", "MiddleButtonReleaseEvent"):
+            iren.AddObserver(event, lambda *_: self._lod_mode(False), 1.0)
+
+    def _lod_mode(self, fast: bool) -> None:
+        """Switch between fast (interaction) and full-quality (still) rendering."""
+        if self.lines_actor is not None:
+            prop = self.lines_actor.GetProperty()
+            if fast:
+                prop.RenderLinesAsTubesOff()
+                prop.SetLineWidth(1)
+            else:
+                prop.RenderLinesAsTubesOn()
+                prop.SetLineWidth(6)
+        if self.spots_actor is not None:
+            self.spots_actor.SetVisibility(0 if fast else 1)
+        if not fast:
+            self.plotter.render()
 
     def _setup_clipping(self) -> None:
         """Attach a GPU clipping plane for fast layer-by-layer Z filtering."""
